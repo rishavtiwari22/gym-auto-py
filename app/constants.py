@@ -1,0 +1,11 @@
+import os
+
+# --- States for Conversations ---
+IDLE, GET_NAME, GET_PHONE, GET_ADDRESS, GET_OCCUPATION, GET_PLAN, GET_DURATION, GET_AMOUNT, GET_DUE_DATE = range(9)
+ADMIN_SEARCH = range(9, 10)
+ADMIN_BROADCAST = range(10, 11)
+RENEW_AMOUNT, RENEW_DURATION = range(11, 13)
+ADMIN_TARGETED_BROADCAST = range(13, 14)
+
+# --- Config ---
+ADMIN_ID = os.getenv("ADMIN_ID")

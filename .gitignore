@@ -1,0 +1,21 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Environment variables
+.env
+
+# Local data
+gym_data.json
+
+# Google Sheets credentials
+credentials.json
+authorized_user.json
+    
