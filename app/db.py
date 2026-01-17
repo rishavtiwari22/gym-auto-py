@@ -31,8 +31,8 @@ class DatabaseManager:
         
         if self.use_sheets:
             self._init_sheets_oauth()
-            # We don't force refresh in __init__ to avoid timeouts on Vercel (cold starts)
-            # data will be loaded on first access if needed
+            # Initial full load
+            self.refresh_cache(force=True)
 
     def _init_sheets_oauth(self) -> None:
         """Initialize Google Sheets connection."""
