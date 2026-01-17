@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: gym-auto-py
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn api.webhook:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.13
+      - key: ENABLE_SHEETS
+        value: "true"
+      # Manual keys required in dashboard:
+      # BOT_TOKEN, ADMIN_ID, GOOGLE_SHEET_NAME, GOOGLE_SERVICE_ACCOUNT_JSON, OPENAI_API_KEY
