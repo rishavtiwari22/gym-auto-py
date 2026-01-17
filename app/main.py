@@ -1,5 +1,6 @@
 import os
 import logging
+import warnings
 from telegram import Update
 from telegram.ext import (
     Application,
@@ -7,19 +8,15 @@ from telegram.ext import (
     ContextTypes,
     filters,
     CommandHandler,
+    ConversationHandler,
+    CallbackQueryHandler
 )
 from dotenv import load_dotenv
 
-from app.intent import detect_intent
-from app.responses import handle_intent, db
-from app.ai import ask_ai, GYM_CONTEXT
-
-import warnings
-
-# Silence deprecation warnings from libraries for a cleaner terminal
+# Silence deprecation warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
 
-# Configure Logging - set to WARNING to keep the terminal clean
+# Configure Logging
 logging.basicConfig(
     format='%(levelname)s: %(message)s',
     level=logging.WARNING
@@ -28,95 +25,89 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 
+from app.intent import detect_intent
+from app.responses import handle_intent, db
+from app.ai import ask_ai
+from app.ui import get_keyboard, BUTTON_TO_INTENT
+from app.constants import (
+    IDLE, GET_NAME, GET_PHONE, GET_ADDRESS, GET_OCCUPATION, 
+    GET_PLAN, GET_DURATION, GET_AMOUNT, GET_DUE_DATE,
+    ADMIN_SEARCH, ADMIN_BROADCAST, RENEW_AMOUNT, RENEW_DURATION,
+    ADMIN_TARGETED_BROADCAST, EDIT_MEMBER_FIELD, ADMIN_ID
+)
+
+# Import handlers from modules
+from app.user import (
+    start, reg_start, reg_name, reg_phone, reg_address, reg_occupation,
+    reg_plan, reg_duration, reg_amount, reg_due_date, reg_final,
+    handle_member_mode, handle_user_profile_menu, handle_user_info_menu,
+    handle_user_about_menu, handle_user_services_menu, handle_user_training_menu,
+    handle_user_tracker_menu, handle_user_coach_menu, handle_user_workout_logs,
+    handle_staff_info, handle_gym_rules, handle_faq, handle_admin_contact,
+    handle_view_machines, handle_check_in, handle_check_out, handle_view_attendance,
+    handle_admin_dash_return, handle_message, handle_user_attendance_menu  # Added handle_message, handle_user_attendance_menu
+)
+from app.admin import (
+    handle_admin_dash, handle_admin_membership_menu, handle_admin_financial_menu,
+    handle_admin_intelligence_menu, handle_admin_list, handle_admin_search_start,
+    handle_admin_search_results, handle_admin_revenue, handle_admin_dues,
+    handle_admin_growth, handle_admin_top_active, handle_admin_payment_logs,
+    handle_admin_occupation, handle_admin_expired, handle_admin_inactive,
+    handle_admin_expiring, handle_admin_ai_advisor, handle_admin_broadcast_start,
+    handle_admin_broadcast_send, admin_callback, admin_renew_amount,
+    admin_renew_duration, handle_admin_targeted_broadcast_send, handle_edit_member_field
+)
+
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID = os.getenv("ADMIN_ID")
 
 if not BOT_TOKEN:
     raise ValueError("❌ BOT_TOKEN is missing in your .env file.")
 
-
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Main message handler for all user interactions."""
-    if not update.message or not update.message.text:
-        return
-
-    user_id = update.effective_user.id
-    user_message = update.message.text.strip()
-    
-    # Clean terminal output
-    print(f"\n👤 User ({user_id}): {user_message}")
-
-    try:
-        # 1. Detect Intent
-        intent = detect_intent(user_message)
-        print(f"🤖 Intent: {intent}")
-
-        # 2. Handle static/database specific queries
-        response = handle_intent(intent, user_message, user_id=user_id)
-
-        # 3. Use AI for logic if no static response is available
-        if response is None:
-            if intent == "workout":
-                response = ask_ai(f"Create a gym workout plan for: {user_message}")
-            elif intent == "diet":
-                response = ask_ai(f"Create a gym diet plan for: {user_message}")
-            else:
-                response = ask_ai(user_message)
-
-        await update.message.reply_text(response, parse_mode="Markdown")
-        
-    except Exception as e:
-        logger.error(f"Error in handle_message: {e}")
-        await update.message.reply_text("⚠️ Sorry, I encountered an error. Please try again later.")
-
-
-async def add_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Admin command to register a new member: /add_member <user_id> <fullname> <plan>"""
-    if str(update.effective_user.id) != ADMIN_ID:
-        await update.message.reply_text("❌ Unauthorized. This command is restricted to administrators.")
-        return
-
-    try:
-        args = context.args
-        if len(args) < 3:
-            await update.message.reply_text("💡 Usage: `/add_member <user_id> <fullname> <plan>`\nExample: `/add_member 12345678 John Doe Gold`", parse_mode="Markdown")
-            return
-        
-        target_id = args[0]
-        full_name = " ".join(args[1:-1])
-        plan = args[-1]
-        
-        if db:
-            db.add_member(target_id, full_name, plan)
-            await update.message.reply_text(f"✅ *Member Registered*\nName: {full_name}\nID: {target_id}\nPlan: {plan}", parse_mode="Markdown")
-        else:
-            await update.message.reply_text("⚠️ Database is offline.")
-    except Exception as e:
-        logger.error(f"Error in add_member: {e}")
-        await update.message.reply_text(f"❌ Failed to add member: {e}")
-
+# handle_message is now imported from app.user
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Log errors caused by Updates."""
-    logger.error(f"Exception while handling an update: {context.error}")
+    logger.error(f"Error handling update: {context.error}")
 
-
-def main():
-    """Start the bot."""
+def create_application():
+    """Shared application factory for polling and webhooks."""
     app = Application.builder().token(BOT_TOKEN).build()
     
-    # Register error handler
+    conv_handler = ConversationHandler(
+        entry_points=[
+            CommandHandler("start", start),
+            MessageHandler(filters.TEXT & (filters.Regex("^📝 Join$") | filters.Regex("(?i)register") | filters.Regex("(?i)join")), reg_start),
+            MessageHandler(filters.TEXT & filters.Regex("^🔍 Search$"), handle_admin_search_start),
+            MessageHandler(filters.TEXT & filters.Regex("^📢 Alert$"), handle_admin_broadcast_start),
+            CallbackQueryHandler(admin_callback),
+            MessageHandler(filters.TEXT, handle_message),
+        ],
+        states={
+            GET_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, reg_name)],
+            GET_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, reg_phone)],
+            GET_ADDRESS: [MessageHandler(filters.TEXT & ~filters.COMMAND, reg_address)],
+            GET_OCCUPATION: [MessageHandler(filters.TEXT & ~filters.COMMAND, reg_occupation)],
+            GET_PLAN: [MessageHandler(filters.TEXT & ~filters.COMMAND, reg_plan)],
+            GET_DURATION: [MessageHandler(filters.TEXT & ~filters.COMMAND, reg_duration)],
+            GET_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, reg_amount)],
+            GET_DUE_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, reg_due_date)],
+            ADMIN_SEARCH: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_admin_search_results)],
+            ADMIN_BROADCAST: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_admin_broadcast_send)],
+            RENEW_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_renew_amount)],
+            RENEW_DURATION: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_renew_duration)],
+            ADMIN_TARGETED_BROADCAST: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_admin_targeted_broadcast_send)],
+            EDIT_MEMBER_FIELD: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_edit_member_field)],
+        },
+        fallbacks=[CommandHandler("start", start)], per_message=False,
+    )
+
+    app.add_handler(conv_handler)
     app.add_error_handler(error_handler)
-    
-    # Handlers
-    app.add_handler(CommandHandler("add_member", add_member))
-    app.add_handler(CommandHandler("start", handle_message))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    return app
 
-    gym_name = GYM_CONTEXT.get('gym_name', 'Gym')
-    print(f"🚀 {gym_name} Assistant is online and running...")
+def main():
+    app = create_application()
+    print("🚀 Gym Assistant is online (Polling mode)...")
     app.run_polling()
-
 
 if __name__ == "__main__":
     main()

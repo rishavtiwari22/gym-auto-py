@@ -7,7 +7,9 @@ from app.constants import (
     IDLE, GET_NAME, GET_PHONE, GET_ADDRESS, GET_OCCUPATION, 
     GET_PLAN, GET_DURATION, GET_AMOUNT, GET_DUE_DATE, ADMIN_ID
 )
-from app.ui import get_keyboard
+from app.ui import get_keyboard, BUTTON_TO_INTENT
+from app.intent import detect_intent
+# from app.responses import handle_intent # Move inside to prevent circular issues
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +24,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id_str = str(user_id)
     is_admin = user_id_str == ADMIN_ID
     
-    if is_admin:
+    # Check if admin has explicitly switched to user mode
+    current_mode = context.user_data.get('current_mode', 'admin' if is_admin else 'user')
+    
+    if is_admin and current_mode == 'admin':
         message = (
             "🛠️ *Welcome, Admin!*\n\n"
             "You have full access to both the **Admin Dashboard** and the **Member Hub**.\n"
@@ -47,15 +52,152 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(message, reply_markup=get_keyboard(intent, user_id), parse_mode="Markdown")
     return IDLE
 
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handles all button presses and text messages."""
+    user = update.effective_user
+    text = update.message.text.strip()
+    
+    # Handle Back button with parent menu mapping
+    if text == "🔙 Back":
+        # Get current intent from context or default to main_menu
+        current_intent = context.user_data.get('last_intent', 'main_menu')
+        
+        # Parent menu mapping - one step back (updated for 4-category structure)
+        parent_map = {
+            # Attendance
+            "check_in": "user_attendance_menu",
+            "check_out": "user_attendance_menu",
+            "view_attendance": "user_attendance_menu",
+            "user_attendance_menu": "main_menu",
+            
+            # Profile (includes Staff & Contact)
+            "check_membership": "user_profile_menu",
+            "staff_info": "user_profile_menu",
+            "admin_contact": "user_profile_menu",
+            "user_profile_menu": "main_menu",
+            
+            # Training (merged Tracker + Coach)
+            "workout": "user_training_menu",
+            "diet": "user_training_menu",
+            "user_workout_logs": "user_training_menu",
+            "user_training_menu": "main_menu",
+            
+            # Gym Info (Hours, Fees, Machines, Rules, FAQ)
+            "gym_timing": "user_info_menu",
+            "fees": "user_info_menu",
+            "view_machines": "user_info_menu",
+            "gym_rules": "user_info_menu",
+            "faq": "user_info_menu",
+            "user_info_menu": "main_menu",
+        }
+        
+        # Get parent intent or default to main_menu
+        parent_intent = parent_map.get(current_intent, "main_menu")
+        
+        await update.message.reply_text(
+            "Going back...",
+            reply_markup=get_keyboard(parent_intent, user.id)
+        )
+        
+        # Store the new intent
+        context.user_data['last_intent'] = parent_intent
+        return IDLE
+    
+    # Map button text to intent
+    intent = BUTTON_TO_INTENT.get(text)
+    
+    # AI detection if not a button
+    if not intent:
+        intent = detect_intent(text)
+    
+    print(f"👤 User ({user.id}): {text} | 🤖 Intent: {intent}")
+
+    # Store current intent for Back button
+    context.user_data['last_intent'] = intent
+    
+    # 1. Handle Hubs (Navigation)
+    from app.admin import (
+        handle_admin_dash, handle_admin_membership_menu, handle_admin_financial_menu,
+        handle_admin_intelligence_menu, handle_admin_list, handle_admin_revenue,
+        handle_admin_dues, handle_admin_growth, handle_admin_top_active,
+        handle_admin_payment_logs, handle_admin_occupation, handle_admin_expired,
+        handle_admin_inactive, handle_admin_expiring, handle_admin_ai_advisor,
+        handle_admin_broadcast_start, handle_edit_member_field
+    )
+    
+    hub_handlers = {
+        "admin_dash": handle_admin_dash,
+        "admin_membership_menu": handle_admin_membership_menu,
+        "admin_financial_menu": handle_admin_financial_menu,
+        "admin_intelligence_menu": handle_admin_intelligence_menu,
+        "admin_member_mode": handle_member_mode,
+        "user_profile_menu": handle_user_profile_menu,
+        "user_info_menu": handle_user_info_menu,
+        "user_attendance_menu": handle_user_attendance_menu,
+        "user_training_menu": handle_user_training_menu,
+        "main_menu": start,
+        "admin_dash_return": handle_admin_dash_return,
+        "admin_list": handle_admin_list,
+        "admin_revenue": handle_admin_revenue,
+        "admin_dues": handle_admin_dues,
+        "admin_growth": handle_admin_growth,
+        "admin_top_active": handle_admin_top_active,
+        "admin_payment_logs": handle_admin_payment_logs,
+        "admin_occupation": handle_admin_occupation,
+        "admin_expired": handle_admin_expired,
+        "admin_inactive": handle_admin_inactive,
+        "admin_expiring": handle_admin_expiring,
+        "admin_ai_advisor": handle_admin_ai_advisor,
+        "user_workout_logs": handle_user_workout_logs,
+        "staff_info": handle_staff_info,
+        "gym_rules": handle_gym_rules,
+        "faq": handle_faq,
+        "admin_contact": handle_admin_contact,
+        "view_machines": handle_view_machines,
+        "check_in": handle_check_in,
+        "check_out": handle_check_out,
+        "view_attendance": handle_view_attendance,
+    }
+
+    if intent in hub_handlers:
+        return await hub_handlers[intent](update, context)
+
+    # 2. Handle Static Queries
+    from app.responses import handle_intent as process_intent
+    response = process_intent(intent, text, user_id=user.id)
+    
+    # 3. AI Backup
+    if response is None or "I'm not sure" in response:
+        from app.ai import ask_ai
+        response = ask_ai(text)
+
+    await update.message.reply_text(response, reply_markup=get_keyboard(intent, user.id), parse_mode="Markdown")
+    return IDLE
+
 async def handle_member_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Explicitly shows the Member Hub for an Admin."""
+    """Explicitly shows the Member Hub for an Admin - persists until switched back."""
     user = update.effective_user
     member = db.get_member(user.id)
     name = member.get("Full Name", user.first_name) if member else user.first_name
     
+    # Store mode in context to persist it
+    context.user_data['current_mode'] = 'user'
+    
     await update.message.reply_text(
-        f"👤 *Logged in as Member: {name}*\nChoose a feature to use:",
+        f"👤 *Switched to User Mode*\n"
+        f"Logged in as: {name}\n\n"
+        f"You'll stay in User Mode until you switch back to Admin Mode.",
         reply_markup=get_keyboard("main_menu", user.id),
+        parse_mode="Markdown"
+    )
+    return IDLE
+
+async def handle_user_attendance_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Shows Attendance Central Hub."""
+    context.user_data['last_intent'] = 'user_attendance_menu'
+    await update.message.reply_text(
+        "📍 *Attendance & Check-In*\n━━━━━━━━━━━━━━\nCheck-in to your session or view your history:",
+        reply_markup=get_keyboard("user_attendance_menu", update.effective_user.id),
         parse_mode="Markdown"
     )
     return IDLE
@@ -604,7 +746,7 @@ async def reg_due_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return GET_DUE_DATE
 
 async def handle_check_in(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Records member check-in time."""
+    """Records member check-in time using session-based tracking."""
     user_id = update.effective_user.id
     
     # Get member info
@@ -618,33 +760,47 @@ async def handle_check_in(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     name = member.get('Full Name', 'Member')
     
-    # Log check-in to attendance sheet
+    # Check if user already has an active session
+    active_session = db.get_active_session(user_id) if db else None
+    if active_session:
+        checkin_time = active_session.get('Check-In Time', 'Unknown')
+        await update.message.reply_text(
+            f"⚠️ *Already Checked In!*\n"
+            f"━━━━━━━━━━━━━━\n"
+            f"You're already checked in at *{checkin_time}*.\n\n"
+            f"Please check out first before checking in again.",
+            reply_markup=get_keyboard("main_menu", user_id),
+            parse_mode="Markdown"
+        )
+        return IDLE
+    
+    # Create new session
     from datetime import datetime
     now = datetime.now()
     date_str = now.strftime("%Y-%m-%d")
     time_str = now.strftime("%H:%M:%S")
     
     try:
-        # Store check-in in context for later check-out
-        context.user_data['check_in_time'] = now
-        
-        # Log to database
+        # Create session in database
         if db:
-            db.log_attendance(user_id, name, "Check In", date_str, time_str)
-        
-        await update.message.reply_text(
-            f"✅ *Check-In Successful!*\n"
-            f"━━━━━━━━━━━━━━\n"
-            f"�� *Name*: {name}\n"
-            f"📅 *Date*: {date_str}\n"
-            f"🕐 *Time*: {time_str}\n\n"
-            f"Have a great workout! 💪",
-            reply_markup=get_keyboard("main_menu", user_id),
-            parse_mode="Markdown"
-        )
+            session_id = db.create_session(user_id, name, date_str, time_str)
+            if session_id:
+                await update.message.reply_text(
+                    f"✅ *Check-In Successful!*\n"
+                    f"━━━━━━━━━━━━━━\n"
+                    f"👤 *Name*: {name}\n"
+                    f"📅 *Date*: {date_str}\n"
+                    f"🕐 *Time*: {time_str}\n\n"
+                    f"Have a great workout! 💪",
+                    reply_markup=get_keyboard("main_menu", user_id),
+                    parse_mode="Markdown"
+                )
+            else:
+                raise Exception("Failed to create session")
     except Exception as e:
+        logger.error(f"Check-in error: {e}")
         await update.message.reply_text(
-            f"❌ Check-in failed: {e}",
+            f"❌ Check-in failed. Please try again.",
             reply_markup=get_keyboard("main_menu", user_id)
         )
     
@@ -664,49 +820,62 @@ async def handle_check_out(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return IDLE
     
     name = member.get('Full Name', 'Member')
+    # Get active session
+    active_session = db.get_active_session(user_id) if db else None
+    if not active_session:
+        await update.message.reply_text(
+            f"❌ *No Active Session!*\n"
+            f"━━━━━━━━━━━━━━\n"
+            f"You haven't checked in yet.\n\n"
+            f"Please check in first before checking out.",
+            reply_markup=get_keyboard("main_menu", user_id),
+            parse_mode="Markdown"
+        )
+        return IDLE
     
-    # Log check-out to attendance sheet
+    name = member.get('Full Name', 'Member')
+    
+    # Get check-out time
     from datetime import datetime
     now = datetime.now()
     date_str = now.strftime("%Y-%m-%d")
     time_str = now.strftime("%H:%M:%S")
     
-    # Calculate duration if check-in exists
-    check_in_time = context.user_data.get('check_in_time')
-    duration_str = "N/A"
-    
-    if check_in_time:
-        duration = now - check_in_time
-        hours = int(duration.total_seconds() // 3600)
-        minutes = int((duration.total_seconds() % 3600) // 60)
-        duration_str = f"{hours}h {minutes}m" if hours > 0 else f"{minutes}m"
-    
     try:
-        # Log to database
-        if db:
-            db.log_attendance(user_id, name, "Check Out", date_str, time_str, duration_str)
+        # Calculate duration
+        checkin_time = active_session.get('Check-In Time')
+        duration_mins = db.calculate_duration_minutes(checkin_time, time_str) if db else 0
         
-        # Clear check-in time
-        context.user_data.pop('check_in_time', None)
-        
-        await update.message.reply_text(
-            f"🚪 *Check-Out Successful!*\n"
-            f"━━━━━━━━━━━━━━\n"
-            f"👤 *Name*: {name}\n"
-            f"📅 *Date*: {date_str}\n"
-            f"🕐 *Time*: {time_str}\n"
-            f"⏱️ *Duration*: {duration_str}\n\n"
-            f"Great session! See you next time! 👋",
-            reply_markup=get_keyboard("main_menu", user_id),
-            parse_mode="Markdown"
-        )
+        # Update session with check-out
+        session_id = active_session.get('Session ID')
+        if db and db.update_checkout(session_id, time_str, duration_mins):
+            # Format duration for display
+            hours = duration_mins // 60
+            mins = duration_mins % 60
+            duration_str = f"{hours}h {mins}m" if hours > 0 else f"{mins}m"
+            
+            await update.message.reply_text(
+                f"🚪 *Check-Out Successful!*\n"
+                f"━━━━━━━━━━━━━━\n"
+                f"👤 *Name*: {name}\n"
+                f"📅 *Date*: {date_str}\n"
+                f"🕐 *Time*: {time_str}\n"
+                f"⏱️ *Duration*: {duration_str} ({duration_mins} mins)\n\n"
+                f"Great session! See you next time! 👋",
+                reply_markup=get_keyboard("main_menu", user_id),
+                parse_mode="Markdown"
+            )
+        else:
+            raise Exception("Failed to update checkout")
     except Exception as e:
+        logger.error(f"Check-out error: {e}")
         await update.message.reply_text(
-            f"❌ Check-out failed: {e}",
+            f"❌ Check-out failed. Please try again.",
             reply_markup=get_keyboard("main_menu", user_id)
         )
     
     return IDLE
+
 
 async def handle_view_attendance(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Shows user's recent attendance history."""
@@ -764,6 +933,21 @@ async def handle_view_attendance(update: Update, context: ContextTypes.DEFAULT_T
     await update.message.reply_text(
         msg,
         reply_markup=get_keyboard("user_tracker_menu", user_id),
+        parse_mode="Markdown"
+    )
+    return IDLE
+
+async def handle_admin_dash_return(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Switch admin back to admin mode from user mode."""
+    user_id = update.effective_user.id
+    
+    # Clear user mode - return to admin mode
+    context.user_data['current_mode'] = 'admin'
+    
+    await update.message.reply_text(
+        "🛠️ *Switched to Admin Mode*\n\n"
+        "You're back in Admin Mode with full dashboard access.",
+        reply_markup=get_keyboard("admin_dash", user_id),
         parse_mode="Markdown"
     )
     return IDLE

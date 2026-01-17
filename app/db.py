@@ -35,27 +35,16 @@ class DatabaseManager:
             self.refresh_cache(force=True)
 
     def _init_sheets_oauth(self) -> None:
-        """Initialize Google Sheets connection using Service Account for Vercel compatibility."""
+        """Initialize Google Sheets connection."""
         try:
-            # Check for service account credentials (Vercel / Production)
-            service_account_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
-            
-            if service_account_json:
-                # Use service account for serverless environments (Vercel)
-                import json
-                creds_dict = json.loads(service_account_json)
-                gc = gspread.service_account_from_dict(creds_dict)
-            else:
-                # Fallback to OAuth for local development
-                gc = gspread.oauth(credentials_filename="credentials.json")
-            
+            gc = gspread.oauth(credentials_filename="credentials.json")
             sheet_name = os.getenv("GOOGLE_SHEET_NAME", "GymAutomationDB")
             self.spreadsheet = gc.open(sheet_name)
             
             # Data Sheets
             self.members_sheet = self._get_or_create_sheet("Members")
             self.payment_history_sheet = self._get_or_create_sheet("Payment_History")
-            self.attendance_sheet = self._get_or_create_sheet("Attendance")
+            self.attendance_sheet = self._get_or_create_sheet("Attendance")  # Use existing sheet
             self.classes_sheet = self._get_or_create_sheet("Classes")
             self.dashboard_sheet = self._get_or_create_sheet("Analytics_Dashboard")
             
@@ -77,9 +66,9 @@ class DatabaseManager:
             return self.spreadsheet.worksheet(name)
         except gspread.exceptions.WorksheetNotFound:
             headers = {
-                "Members": ["User ID", "Full Name", "Phone", "Address", "Occupation", "Plan", "Membership Type", "Duration (Months)", "Amount Paid", "Status", "Join Date", "Expiry Date", "Last Renewal", "Due Date", "Due Amount"],
-                "Payment_History": ["Transaction ID", "User ID", "Full Name", "Date", "Action", "Plan", "Duration (Months)", "Amount", "Expiry Date", "Payment Method", "Notes"],
-                "Attendance": ["Log ID", "Date", "Time", "User ID", "Full Name", "Workout Type", "Duration", "Notes", "Present"],
+                "Members": ["User ID", "Full Name", "Phone", "Address", "Occupation", "Plan", "Membership Type", "Duration (Months)", "Amount Paid", "Status", "Join Date", "Expiry Date", "Last Renewal"],
+                "Payment_History": ["Transaction ID", "User ID", "Full Name", "Date", "Action", "Plan", "Duration (Months)", "Amount", "Expiry Date", "Payment Method", "Due Date", "Due Amount"],
+                "Attendance": ["Session ID", "User ID", "Full Name", "Date", "Check-In Time", "Check-Out Time", "Duration (mins)", "Notes"],
                 "Classes": ["Class ID", "Class Name", "Day", "Time", "Duration", "Instructor", "Max Capacity", "Current Enrolled", "Availability", "Active"],
                 "Machines": ["Machine Name", "Muscles Trained", "Description", "Active"]
             }
@@ -104,6 +93,8 @@ class DatabaseManager:
                 self.data["workouts"] = all_logs[-1000:]
             if self.classes_sheet:
                 self.data["classes"] = self.classes_sheet.get_all_records()
+            if self.machines_sheet:
+                self.data["machines"] = self.machines_sheet.get_all_records()
             
             self._last_data_refresh = now
             print(f"✅ Cache Updated. Members: {len(self.data['members'])}")
@@ -133,7 +124,7 @@ class DatabaseManager:
         member_row = [
             str(user_id), full_name, phone, address, occupation, plan,
             membership_type, duration_months if membership_type != "Trial" else 0,
-            amount_paid, status, join_date, expiry_date, join_date, due_date, due_amount
+            amount_paid, status, join_date, expiry_date, join_date  # 13 columns - removed due_date, due_amount
         ]
         
         # 1. Update Sheets (Member row)
@@ -147,7 +138,7 @@ class DatabaseManager:
                     break
             
             if row_idx != -1:
-                self.members_sheet.update(values=[member_row], range_name=f"A{row_idx}:O{row_idx}")
+                self.members_sheet.update(values=[member_row], range_name=f"A{row_idx}:M{row_idx}")
             else:
                 self.members_sheet.append_row(member_row)
         else:
@@ -453,11 +444,12 @@ class DatabaseManager:
         return info
 
     def get_machines(self) -> List[Dict[str, Any]]:
-        """Get all active gym machines."""
+        """Get all gym machines."""
         try:
-            machines = self.machines_sheet.get_all_records()
-            return [m for m in machines if m.get("Active", True)]
-        except:
+            # Return machines from cached data
+            return self.data.get("machines", [])
+        except Exception as e:
+            print(f"❌ Error getting machines: {e}")
             return []
 
     def log_attendance(self, user_id: int, name: str, action: str, date: str, time: str, duration: str = "N/A") -> None:
@@ -496,24 +488,52 @@ class DatabaseManager:
         except:
             return []
 
-    def get_members_with_due_date(self, due_date: str) -> List[Dict[str, Any]]:
-        """Get all members with payment due on specific date."""
+    def get_members_with_dues(self) -> List[Dict[str, Any]]:
+        """Returns members who have pending dues."""
         try:
-            self.refresh_cache()
             members_with_dues = []
-            
             for member in self.data.get("members", []):
-                member_due_date = member.get('Due Date', '')
-                due_amount = member.get('Due Amount', '0')
+                # Get dues from Payment_History instead of member record
+                due_date, due_amount = self.get_member_dues(member.get('User ID'))
                 
-                # Check if due date matches and has outstanding balance
-                if member_due_date == due_date and due_amount and due_amount != '0':
-                    members_with_dues.append(member)
+                if due_amount and float(due_amount) > 0:
+                    member_copy = member.copy()
+                    member_copy['Due Date'] = due_date
+                    member_copy['Due Amount'] = due_amount
+                    members_with_dues.append(member_copy)
             
             return members_with_dues
         except Exception as e:
-            print(f"❌ Error getting members with due date: {e}")
+            print(f"❌ Error getting members with dues: {e}")
             return []
+
+    def update_member_dues(self, user_id: int, due_date: str, due_amount: str) -> bool:
+        """Update due date and amount in Payment_History (latest record)."""
+        try:
+            # Find the latest payment record for this user
+            payments = self.payment_history_sheet.get_all_records()
+            
+            # Find the last row for this user
+            row_idx = None
+            for i in range(len(payments) - 1, -1, -1):  # Search from bottom
+                if str(payments[i].get('User ID')) == str(user_id):
+                    row_idx = i + 2  # +1 for 1-indexing, +1 for header
+                    break
+            
+            if row_idx:
+                # Update columns N (Due Date) and O (Due Amount)
+                # Note: Payment_History has duplicate "Due Date" columns (10 and 13)
+                # We update the last ones (columns 13 and 14)
+                self.payment_history_sheet.update_cell(row_idx, 13, due_date)  # Column M (Due Date)
+                self.payment_history_sheet.update_cell(row_idx, 14, due_amount)  # Column N (Due Amount)
+                print(f"✅ Updated dues for user {user_id}: Due Date={due_date}, Due Amount={due_amount}")
+                return True
+            else:
+                print(f"❌ No payment record found for user {user_id}")
+                return False
+        except Exception as e:
+            print(f"❌ Failed to update dues: {e}")
+            return False
 
     def mark_due_as_paid(self, user_id: int) -> bool:
         """Mark member's due payment as paid (set to 0)."""
@@ -538,13 +558,17 @@ class DatabaseManager:
             self.members_sheet.update(values=[["", "0"]], range_name=f"N{row_idx}:O{row_idx}")
             
             # Update Payment_History - set Due Payment to 0 for latest transaction
-            payment_history = self.payment_history_sheet.get_all_records()
-            for i, payment in enumerate(reversed(payment_history)):
-                if str(payment.get('User ID')) == str(user_id):
-                    actual_row = len(payment_history) - i + 1  # +1 for header
-                    # Due Payment is column I (9th column)
-                    self.payment_history_sheet.update(values=[["0"]], range_name=f"I{actual_row}")
-                    break
+            # This part is removed as per the instruction, assuming update_member_dues will handle it
+            # payment_history = self.payment_history_sheet.get_all_records()
+            # for i, payment in enumerate(reversed(payment_history)):
+            #     if str(payment.get('User ID')) == str(user_id):
+            #         actual_row = len(payment_history) - i + 1  # +1 for header
+            #         # Due Payment is column I (9th column)
+            #         self.payment_history_sheet.update(values=[["0"]], range_name=f"I{actual_row}")
+            #         break
+            
+            # Use the new helper to update the payment history
+            self.update_member_dues(user_id, "", "0") # Clear due date and set amount to 0
             
             # Refresh cache
             self.refresh_cache()
@@ -557,3 +581,105 @@ class DatabaseManager:
             import traceback
             traceback.print_exc()
             return False
+
+    # New session-based attendance functions
+    def create_session(self, user_id: int, name: str, date: str, checkin_time: str) -> str:
+        """Create a new attendance session (check-in)."""
+        try:
+            from datetime import datetime
+            
+            # Generate unique session ID
+            timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+            session_id = f"SESS_{date.replace('-', '')}_{user_id}_{timestamp}"
+            
+            row = [
+                session_id,
+                str(user_id),
+                name,
+                date,
+                checkin_time,
+                "",  # Check-Out Time (empty)
+                "",  # Duration (empty)
+                ""   # Notes (empty)
+            ]
+            
+            self.attendance_sheet.append_row(row)
+            print(f"✅ Session created: {session_id} - {name} checked in at {checkin_time}")
+            return session_id
+        except Exception as e:
+            print(f"❌ Failed to create session: {e}")
+            return None
+    
+    def get_active_session(self, user_id: int):
+        """Get user's active session (checked in but not checked out)."""
+        try:
+            # Get all records
+            records = self.attendance_sheet.get_all_records()
+            
+            # Find latest session for this user where Check-Out Time is empty
+            for record in reversed(records):  # Start from most recent
+                if str(record.get("User ID")) == str(user_id) and not record.get("Check-Out Time"):
+                    return record
+            
+            return None
+        except Exception as e:
+            print(f"❌ Failed to get active session: {e}")
+            return None
+    
+    def update_checkout(self, session_id: str, checkout_time: str, duration_mins: int) -> bool:
+        """Update check-out time and duration for a session."""
+        try:
+            # Find the row with this session ID
+            cell = self.attendance_sheet.find(session_id)
+            if not cell:
+                print(f"❌ Session {session_id} not found")
+                return False
+            
+            row_num = cell.row
+            
+            # Update Check-Out Time (column F) and Duration (column G)
+            self.attendance_sheet.update_cell(row_num, 6, checkout_time)  # Column F
+            self.attendance_sheet.update_cell(row_num, 7, duration_mins)  # Column G
+            
+            print(f"✅ Session {session_id} updated: checked out at {checkout_time}, duration {duration_mins} mins")
+            return True
+        except Exception as e:
+            print(f"❌ Failed to update checkout: {e}")
+            return False
+    
+    def calculate_duration_minutes(self, checkin_time: str, checkout_time: str) -> int:
+        """Calculate duration in minutes between two times (HH:MM:SS format)."""
+        try:
+            from datetime import datetime
+            
+            fmt = "%H:%M:%S"
+            checkin = datetime.strptime(checkin_time, fmt)
+            checkout = datetime.strptime(checkout_time, fmt)
+            
+            duration = checkout - checkin
+            minutes = int(duration.total_seconds() / 60)
+            
+            return minutes
+        except Exception as e:
+            print(f"❌ Failed to calculate duration: {e}")
+            return 0
+
+    def get_latest_payment(self, user_id: int):
+        """Get the most recent payment record for a user."""
+        try:
+            payments = self.payment_history_sheet.get_all_records()
+            user_payments = [p for p in payments if str(p.get('User ID')) == str(user_id)]
+            return user_payments[-1] if user_payments else None
+        except Exception as e:
+            print(f"❌ Failed to get latest payment: {e}")
+            return None
+    
+    def get_member_dues(self, user_id: int):
+        """Get due date and due amount for a member from Payment_History."""
+        latest_payment = self.get_latest_payment(user_id)
+        if latest_payment:
+            # Payment_History has two "Due Date" columns - use the last one (column N)
+            due_date = latest_payment.get('Due Date', '')
+            due_amount = latest_payment.get('Due Amount', '0')
+            return due_date, due_amount
+        return '', '0'

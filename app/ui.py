@@ -30,39 +30,34 @@ BUTTON_TO_INTENT = {
     "💀 Past": "admin_expired",
     "🤖 AI Tips": "admin_ai_advisor",
     
-    # User Features
+    # User Features - Individual Actions
     "👤 Status": "check_membership",
-    "📅 Class": "view_schedule",
-    "📝 Log": "log_workout_start",
     "📜 My Logs": "user_workout_logs",
-    "📊 Attendance": "view_attendance",
+    "📊 View Logs": "view_attendance",
     "🤖 Workout": "workout",
     "🥗 Diet": "diet",
-    "🕕 Clock": "gym_timing",
+    "🕕 Hours": "gym_timing",
     "💰 Fees": "fees",
     "🏋️ Machines": "view_machines",
-    "🎟️ Trial": "book_trial",
     "👥 Staff": "staff_info",
     "📜 Rules": "gym_rules",
     
-    # User Hubs
-    "👤 Profile": "user_profile_menu",
+    # Attendance Menu
+    "📍 Attendance": "user_attendance_menu",
+    "✅ In": "check_in",
+    "🚪 Out": "check_out",
+    
+    # Main Category Hubs (4 categories)
+    "👤 My Profile": "user_profile_menu",
     "🏋️‍♂️ Training": "user_training_menu",
-    "ℹ️ Info": "user_info_menu",
-    
-    # User Training Sub-Hubs
-    "📊 Tracker": "user_tracker_menu",
-    "🤖 Coach": "user_coach_menu",
-    
-    # User Info Sub-Hubs
-    "🏢 About": "user_about_menu",
-    "🛠️ Services": "user_services_menu",
+    "ℹ️ Gym Info": "user_info_menu",
     
     # Global
-    "🏠 Home": "main_menu",
-    "🔙 Back": "admin_dash",
+    "🔙 Back": "back",  # Special handling - goes to parent menu
     "🛠️ Admin": "admin_dash",
-    "👤 Member Mode": "admin_member_mode",
+    # Admin Mode Switching
+    "👤 User Mode": "admin_member_mode",
+    "🛠️ Admin Mode": "admin_dash_return",  # Switch back to admin mode
     "📝 Join": "register_start",
     "☎️ Contact": "admin_contact",
     "❓ FAQ": "faq",
@@ -79,6 +74,7 @@ def get_keyboard(intent: str, user_id: int) -> ReplyKeyboardMarkup:
     is_admin = user_id_str == ADMIN_ID
     member = db.get_member(user_id) if db else None
     is_active = member and member.get("Status") == "Active"
+    is_pending = member and member.get("Status") == "Pending"
     
     keyboard = []
 
@@ -87,50 +83,65 @@ def get_keyboard(intent: str, user_id: int) -> ReplyKeyboardMarkup:
         if intent == "admin_dash":
             keyboard = [
                 ["👥 Members", "💰 Finance"],
-                ["📈 Insights", "🏠 Home"]
+                ["📈 Insights", "🔙 Back"]
             ]
         elif intent == "admin_membership_menu":
             keyboard = [
                 ["📋 All", "🔍 Search"],
-                ["📢 Alert", "👤 Member Mode"],
+                ["📢 Alert","👤 User Mode"], 
                 ["🔙 Back"]
             ]
         elif intent == "admin_financial_menu":
             keyboard = [
                 ["📊 Sales", "💸 Dues"],
-                ["📈 Trends", "📜 Logs"],
-                ["🔙 Back"]
+                ["📈 Trends","📜 Logs"],
+                [ "🔙 Back"]
             ]
         elif intent == "admin_intelligence_menu":
             keyboard = [
                 ["🏆 Top 10", "👥 Jobs"],
                 ["⚠️ Risks", "⏳ Near"],
                 ["💀 Past", "🤖 AI Tips"],
-                ["🔙 Back"]
+                [ "🔙 Back"]
             ]
         else:
-            keyboard = [["🔙 Back"], ["🏠 Home"]]
+            keyboard = [["🔙 Back"]]
     # 2. New/Pending User Scenario
-    elif not is_active:
+    elif not is_active and not is_admin: 
         if intent == "register_start":
             return ReplyKeyboardRemove()
-        
-        if intent == "user_info_menu":
+        keyboard = [
+            ["📝 Join"],
+            ["ℹ️ Info", "❓ Help"]
+        ]
+        if is_admin:
+            keyboard.append(["🛠️ Admin"])
+    # 2. Pending Member Scenario
+    elif is_pending and not is_admin:
+        if intent == "new_user":
             keyboard = [
-                ["🏢 About", "🛠️ Services"],
-                ["🏠 Home"]
+                ["🕕 Clock", "💰 Fees"],
+                ["🏋️ Machines", "🏢 About"],
+                ["🎟️ Trial", "❓ FAQ"],
+            ]
+            if is_admin:
+                keyboard.append(["🛠️ Admin"])
+        elif intent == "user_info_menu":
+            keyboard = [
+                ["🏢 About"],
+                ["🛠️ Services", "🔙 Back"]
             ]
         elif intent == "user_about_menu":
             keyboard = [
                 ["🕕 Clock", "👥 Staff"],
-                ["📜 Rules", "☎️ Contact"],
-                ["🏠 Home"]
+                ["📜 Rules"],
+                ["☎️ Contact", "🔙 Back"]
             ]
         elif intent == "user_services_menu":
             keyboard = [
                 ["💰 Fees", "🏋️ Machines"],
-                ["🎟️ Trial", "❓ FAQ"],
-                ["🏠 Home"]
+                ["🎟️ Trial"],
+                ["❓ FAQ", "🔙 Back"]
             ]
         else:
             keyboard = [
@@ -140,54 +151,44 @@ def get_keyboard(intent: str, user_id: int) -> ReplyKeyboardMarkup:
             if is_admin:
                 keyboard.append(["🛠️ Admin"])
     # 3. Active Member Scenario
-    else:
-        if intent in ["main_menu", "greeting", "help", "start", "admin_dash"]: 
+    else: 
+        if intent == "main_menu":
             keyboard = [
                 ["✅ In", "🚪 Out"],
-                ["👤 Profile", "🏋️‍♂️ Training"],
-                ["ℹ️ Info", "🏠 Home"]
+                ["📍 Attendance", "👤 My Profile"],
+                ["🏋️‍♂️ Training", "ℹ️ Gym Info"]
             ]
             if is_admin:
-                keyboard.insert(0, ["🛠️ Admin"]) # Specialized 1-button row at top for Admin
+                keyboard.append(["🛠️ Admin Mode"])
+        elif intent in ["greeting", "help", "start"]: 
+            keyboard = [
+                ["✅ In", "🚪 Out"],
+                ["📍 Attendance", "👤 My Profile"],
+                ["🏋️‍♂️ Training", "ℹ️ Gym Info"]
+            ]
+            if is_admin:
+                keyboard.insert(0, ["🛠️ Admin"])
+        elif intent == "user_attendance_menu":
+            keyboard = [
+                ["📊 View Logs", "🔙 Back"]
+            ]
         elif intent == "user_profile_menu":
             keyboard = [
-                ["👤 Status", "📅 Class"],
-                ["🔙 Back", "🏠 Home"]
+                ["👤 Status", "👥 Staff"],
+                ["☎️ Contact", "🔙 Back"]
             ]
         elif intent == "user_training_menu":
             keyboard = [
-                ["📊 Tracker", "🤖 Coach"],
-                ["🔙 Back", "🏠 Home"]
-            ]
-        elif intent == "user_tracker_menu":
-            keyboard = [
-                ["📝 Log", "📜 My Logs"],
-                ["🔙 Back", "🏠 Home"]
-            ]
-        elif intent == "user_coach_menu":
-            keyboard = [
                 ["🤖 Workout", "🥗 Diet"],
-                ["🔙 Back", "🏠 Home"]
+                ["📜 My Logs", "🔙 Back"]
             ]
         elif intent == "user_info_menu":
             keyboard = [
-                ["🏢 About", "🛠️ Services"],
-                ["🔙 Back", "🏠 Home"]
+                ["🕕 Hours", "💰 Fees"],
+                ["🏋️ Machines", "📜 Rules"],
+                ["❓ FAQ", "🔙 Back"]
             ]
-        elif intent == "user_about_menu":
-            keyboard = [
-                ["🕕 Clock", "👥 Staff"],
-                ["📜 Rules", "☎️ Contact"],
-                ["🔙 Back", "🏠 Home"]
-            ]
-        elif intent == "user_services_menu":
-            keyboard = [
-                ["💰 Fees", "🏋️ Machines"],
-                ["🎟️ Trial", "❓ FAQ"],
-                ["🔙 Back", "🏠 Home"]
-            ]
-        else:
-            keyboard = [["🏠 Home"]]
+        pass
 
     # --- Parent Menu Mapping (Prevention of auto-return) ---
     # Redirect leaf intents to use their parent keyboards
@@ -204,28 +205,30 @@ def get_keyboard(intent: str, user_id: int) -> ReplyKeyboardMarkup:
             "admin_expiring": "admin_intelligence_menu",
             "admin_expired": "admin_intelligence_menu",
             "admin_ai_advisor": "admin_intelligence_menu",
-            # User Info
-            "gym_timing": "user_about_menu",
-            "staff_info": "user_about_menu",
-            "gym_rules": "user_about_menu",
-            "admin_contact": "user_about_menu",
-            "fees": "user_services_menu",
-            "view_facilities": "user_services_menu",
-            "view_machines": "user_services_menu",
-            "book_trial": "user_services_menu",
-            "faq": "user_services_menu",
-            # User Training
-            "user_workout_logs": "user_tracker_menu",
-            "log_workout_start": "user_tracker_menu",
-            "view_attendance": "user_tracker_menu",
-            "workout": "user_coach_menu",
-            "diet": "user_coach_menu",
-            "log_workout": "user_tracker_menu",
+            # Attendance
+            "check_in": "user_attendance_menu",
+            "check_out": "user_attendance_menu",
+            "view_attendance": "user_attendance_menu",
+            # My Profile
             "check_membership": "user_profile_menu",
-            "view_schedule": "user_profile_menu",
+            "staff_info": "user_profile_menu",
+            "admin_contact": "user_profile_menu",
+            # Training
+            "workout": "user_training_menu",
+            "diet": "user_training_menu",
+            "user_workout_logs": "user_training_menu",
+            # Gym Info
+            "gym_timing": "user_info_menu",
+            "fees": "user_info_menu",
+            "view_machines": "user_info_menu",
+            "gym_rules": "user_info_menu",
+            "faq": "user_info_menu",
         }
         if intent in parent_map:
             return get_keyboard(parent_map[intent], user_id)
+        
+        # Final fallback - show HOME if still no keyboard
+        keyboard = [["🔙 Back"]]
 
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
 
@@ -245,7 +248,6 @@ def format_member_card(m: dict) -> str:
         f"• *Paid*: ₹{m.get('Amount Paid', '0')}\n"
         f"• *Joined*: {m.get('Join Date')}\n"
         f"📅 *Expires*: {m.get('Expiry Date', 'N/A')}\n\n"
-        f"🕒 *Last Activity*: {m.get('Plan History', [{'Action': 'Initial', 'Date': 'N/A'}])[-1]['Action']} on {m.get('Plan History', [{'Date': 'N/A'}])[-1]['Date']}\n"
         f"⚡ *Status*: {m.get('Status')}\n"
     )
 
