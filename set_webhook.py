@@ -16,7 +16,8 @@ def set_webhook():
         print("❌ Error: Vercel URL must start with https://")
         return
 
-    # Our vercel.json routes root (/) to api/webhook.py
+    # Clean up trailing slash to avoid double slashes
+    vercel_url = vercel_url.rstrip("/")
     webhook_url = f"{vercel_url}/" 
     
     api_url = f"https://api.telegram.org/bot{token}/setWebhook?url={webhook_url}"
