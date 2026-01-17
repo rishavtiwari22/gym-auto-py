@@ -1,8 +1,11 @@
-import os
 import logging
 from fastapi import FastAPI, Request, Response
 from telegram import Update
 from app.main import create_application
+
+# Configure Logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Initialize FastAPI
 app = FastAPI()
@@ -23,7 +26,7 @@ async def webhook(request: Request):
         update = Update.de_json(data, telegram_app.bot)
         await telegram_app.process_update(update)
     except Exception as e:
-        logging.error(f"Error processing update: {e}")
+        logger.error(f"Error processing update: {e}")
     return Response(status_code=200)
 
 @app.get("/")
