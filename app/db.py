@@ -37,7 +37,18 @@ class DatabaseManager:
     def _init_sheets_oauth(self) -> None:
         """Initialize Google Sheets connection."""
         try:
-            gc = gspread.oauth(credentials_filename="credentials.json")
+            # First check for Service Account JSON in environment (Vercel/Production)
+            service_account_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
+            if service_account_json:
+                try:
+                    creds_dict = json.loads(service_account_json)
+                    gc = gspread.service_account_from_dict(creds_dict)
+                except json.JSONDecodeError:
+                    # If it's not JSON, it might be a path to a file (fallback)
+                    gc = gspread.service_account(filename=service_account_json)
+            else:
+                # Fallback to OAuth flow (Local/Dev)
+                gc = gspread.oauth(credentials_filename="credentials.json")
             sheet_name = os.getenv("GOOGLE_SHEET_NAME", "GymAutomationDB")
             self.spreadsheet = gc.open(sheet_name)
             
