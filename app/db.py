@@ -23,6 +23,12 @@ class DatabaseManager:
         self.attendance_sheet = None
         self.classes_sheet = None
         self.dashboard_sheet = None
+        self.settings_sheet = None
+        self.fees_structure_sheet = None
+        self.trainers_info_sheet = None
+        self.kb_sheet = None
+        self.faq_sheet = None
+        self.machines_sheet = None
         
         # Cache management
         self._last_data_refresh = 0
@@ -44,9 +50,15 @@ class DatabaseManager:
             service_account_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
             if service_account_json:
                 try:
+                    # Clean up the string (it might contain extra quotes or whitespace)
+                    service_account_json = service_account_json.strip()
+                    if service_account_json.startswith("'") and service_account_json.endswith("'"):
+                        service_account_json = service_account_json[1:-1]
+                    
                     creds_dict = json.loads(service_account_json)
                     gc = gspread.service_account_from_dict(creds_dict)
-                except json.JSONDecodeError:
+                except json.JSONDecodeError as je:
+                    logger.error(f"❌ JSON Decode Error in service account: {je}")
                     # If it's not JSON, it might be a path to a file (fallback)
                     gc = gspread.service_account(filename=service_account_json)
             else:
