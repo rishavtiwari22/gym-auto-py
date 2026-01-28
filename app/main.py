@@ -104,8 +104,20 @@ def create_application():
     app.add_error_handler(error_handler)
     return app
 
+from app.scheduler import start_scheduler
+
 def main():
     app = create_application()
+    
+    # Start Scheduler (for Polling mode background tasks)
+    if db and ADMIN_ID:
+        try:
+            scheduler = start_scheduler(app.bot, db, ADMIN_ID)
+            scheduler.start()
+            print("📅 Payment Reminder Scheduler active.")
+        except Exception as e:
+            print(f"⚠️ Scheduler failed to start: {e}")
+            
     print("🚀 Gym Assistant is online (Polling mode)...")
     app.run_polling()
 
