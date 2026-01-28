@@ -55,8 +55,19 @@ async def webhook(request: Request):
 
 @app.get("/")
 async def index():
+    db_status = "Not Initialized"
+    member_count = 0
+    if db:
+        db_status = "Connected" if db.members_sheet else "Connection Failed"
+        member_count = len(db.data.get("members", []))
+        
     return {
         "status": "Gym Bot is online", 
         "mode": "webhook",
-        "initialized": telegram_app._initialized if hasattr(telegram_app, '_initialized') else False
+        "initialized": telegram_app._initialized if hasattr(telegram_app, '_initialized') else False,
+        "database": {
+            "status": db_status,
+            "members_loaded": member_count,
+            "sheets_enabled": os.getenv("ENABLE_SHEETS", "true")
+        }
     }
