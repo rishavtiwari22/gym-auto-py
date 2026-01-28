@@ -4,6 +4,9 @@ import datetime
 import time
 from typing import Optional, Dict, List, Any
 import gspread
+import logging
+
+logger = logging.getLogger(__name__)
 
 class DatabaseManager:
     """
@@ -68,8 +71,10 @@ class DatabaseManager:
             self.machines_sheet = self._get_or_create_sheet("Machines")
             
             print(f"✅ Google Sheets '{sheet_name}' initialized as Primary DB.")
+            logger.info(f"✅ Google Sheets '{sheet_name}' initialized as Primary DB.")
         except Exception as e:
             print(f"⚠️ Google Sheets Init Error: {e}")
+            logger.error(f"⚠️ Google Sheets Init Error: {e}", exc_info=True)
 
     def _get_or_create_sheet(self, name: str):
         """Get worksheet or create if missing."""
@@ -109,8 +114,10 @@ class DatabaseManager:
             
             self._last_data_refresh = now
             print(f"✅ Cache Updated. Members: {len(self.data['members'])}")
+            logger.info(f"✅ Cache Updated. Members: {len(self.data['members'])}")
         except Exception as e:
             print(f"⚠️ Cache Refresh Failed: {e}")
+            logger.error(f"⚠️ Cache Refresh Failed: {e}", exc_info=True)
 
     # --- Member Methods ---
     def get_member(self, user_id: Any) -> Optional[Dict[str, Any]]:
