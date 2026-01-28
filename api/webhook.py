@@ -1,4 +1,5 @@
 import logging
+import os
 from fastapi import FastAPI, Request, Response
 from telegram import Update
 from app.main import create_application
