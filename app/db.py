@@ -46,24 +46,53 @@ class DatabaseManager:
     def _init_sheets_oauth(self) -> None:
         """Initialize Google Sheets connection."""
         try:
-            # First check for Service Account JSON in environment (Vercel/Production)
-            service_account_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
-            if service_account_json:
+            # 1. Check for OAuth Token (Workaround for blocked Service Account Keys)
+            oauth_token_json = os.getenv("GOOGLE_OAUTH_TOKEN")
+            if oauth_token_json:
                 try:
-                    # Clean up the string (it might contain extra quotes or whitespace)
+                    logger.info("🔑 Using GOOGLE_OAUTH_TOKEN for authentication...")
+                    # Clean/parse token JSON
+                    oauth_token_json = oauth_token_json.strip()
+                    if oauth_token_json.startswith("'") and oauth_token_json.endswith("'"):
+                        oauth_token_json = oauth_token_json[1:-1]
+                    
+                    token_dict = json.loads(oauth_token_json)
+                    with open("temp_token.json", "w") as f:
+                        json.dump(token_dict, f)
+                    
+                    # We need credentials.json for the client config part, 
+                    # but authorized_user_file for the token part.
+                    gc = gspread.oauth(
+                        credentials_filename="credentials.json",
+                        authorized_user_filename="temp_token.json"
+                    )
+                    logger.info("✅ Authenticated via OAuth Token.")
+                except Exception as e:
+                    logger.error(f"❌ OAuth Token Auth Failed: {e}")
+                    gc = None
+            
+            # 2. Fallback to Service Account JSON (Production)
+            elif os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON"):
+                service_account_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
+                try:
                     service_account_json = service_account_json.strip()
                     if service_account_json.startswith("'") and service_account_json.endswith("'"):
                         service_account_json = service_account_json[1:-1]
                     
                     creds_dict = json.loads(service_account_json)
                     gc = gspread.service_account_from_dict(creds_dict)
-                except json.JSONDecodeError as je:
-                    logger.error(f"❌ JSON Decode Error in service account: {je}")
-                    # If it's not JSON, it might be a path to a file (fallback)
+                except Exception as e:
+                    logger.error(f"❌ Service Account Auth Failed: {e}")
                     gc = gspread.service_account(filename=service_account_json)
+            
+            # 3. Last Fallback to local credentials.json (Local Dev)
             else:
-                # Fallback to OAuth flow (Local/Dev)
+                logger.info("🏠 Using local credentials.json (OAuth flow)...")
                 gc = gspread.oauth(credentials_filename="credentials.json")
+
+            if not gc:
+                raise Exception("Failed to initialize Google Sheets client (no valid credentials)")
+
             sheet_name = os.getenv("GOOGLE_SHEET_NAME", "GymAutomationDB")
             self.spreadsheet = gc.open(sheet_name)
             

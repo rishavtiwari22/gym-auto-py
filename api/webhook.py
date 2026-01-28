@@ -58,8 +58,11 @@ async def index():
     db_status = "Not Initialized"
     member_count = 0
     if db:
-        db_status = "Connected" if db.members_sheet else "Connection Failed"
-        member_count = len(db.data.get("members", []))
+        try:
+            db_status = "Connected" if getattr(db, 'members_sheet', None) else "Connection Failed"
+            member_count = len(db.data.get("members", []))
+        except Exception:
+            db_status = "Error Checking Status"
         
     return {
         "status": "Gym Bot is online", 
