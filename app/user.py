@@ -502,6 +502,7 @@ async def reg_final(update: Update, context: ContextTypes.DEFAULT_TYPE):
             address=address,
             occupation=occupation,
             plan=plan,
+            status="Pending",  # Status is Pending until approved by admin
             membership_type=membership_type,
             duration_months=duration,
             amount_paid=amount_paid,
@@ -509,41 +510,28 @@ async def reg_final(update: Update, context: ContextTypes.DEFAULT_TYPE):
             due_amount=due_amount_str
         )
         
-        # Send success message to user with complete details
-        user_msg = (
-            f"✅ *Registration Successful!*\n"
+        # Send waiting message to user
+        user_wait_msg = (
+            f"⏳ *Registration Received!*\n"
             f"━━━━━━━━━━━━━━\n"
-            f"🏋️ Welcome to Jashpur Fitness, *{name}*!\n\n"
-            f"📝 *Your Registration Details*\n"
-            f"• *Name*: {name}\n"
-            f"• *Phone*: {phone}\n"
-            f"• *Address*: {address}\n"
-            f"• *Occupation*: {occupation}\n\n"
-            f"💳 *Membership Plan*\n"
+            f"Thank you, *{name}*! Your registration has been submitted for approval.\n\n"
+            f"📝 *Summary*\n"
             f"• *Plan*: {plan}\n"
-            f"• *Duration*: {duration} months\n\n"
-            f"💰 *Payment Details*\n"
-            f"• *Total Fee*: ₹{total:,}\n"
-            f"• *Paid Now*: ₹{paid:,}\n"
+            f"• *Paid*: ₹{paid:,}\n"
+            f"• *Status*: 🟡 Pending Admin Approval\n\n"
+            f"You'll receive a notification once the admin approves your membership. 💪"
         )
         
-        if remaining > 0:
-            user_msg += f"• *Remaining*: ₹{remaining:,}\n"
-            if due_date:
-                user_msg += f"• *Due Date*: {due_date}\n"
-        
-        user_msg += f"\n🚀 Your membership is now active. Start your fitness journey today! 💪"
-        
         await update.message.reply_text(
-            user_msg,
+            user_wait_msg,
             reply_markup=get_keyboard("main_menu", user_id),
             parse_mode="Markdown"
         )
         
-        # Send comprehensive registration summary to admin (persistent message)
+        # Send comprehensive registration summary to admin with ACTION BUTTONS
         from app.constants import ADMIN_ID
         admin_msg = (
-            f"🆕 *NEW MEMBER REGISTRATION*\n"
+            f"🔔 *NEW REGISTRATION REQUEST*\n"
             f"━━━━━━━━━━━━━━━━━━━━━━━\n\n"
             f"👤 *PERSONAL INFORMATION*\n"
             f"• *Full Name*: {name}\n"
@@ -553,7 +541,7 @@ async def reg_final(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"• *Occupation*: {occupation}\n\n"
             f"💳 *MEMBERSHIP DETAILS*\n"
             f"• *Plan Selected*: {plan}\n"
-            f"• *Membership Type*: {membership_type}\n"
+            f"• *Type*: {membership_type}\n"
             f"• *Duration*: {duration} months\n\n"
             f"💰 *PAYMENT INFORMATION*\n"
             f"• *Total Fee*: ₹{total:,}\n"
@@ -561,28 +549,34 @@ async def reg_final(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         
         if remaining > 0:
-            admin_msg += (
-                f"• *⚠️ Balance Due*: ₹{remaining:,}\n"
-            )
+            admin_msg += f"• *⚠️ Balance Due*: ₹{remaining:,}\n"
             if due_date:
-                admin_msg += f"• *📅 Payment Due Date*: {due_date}\n"
-            admin_msg += f"\n🔔 *ACTION REQUIRED*: Follow up for remaining payment\n"
+                admin_msg += f"• *📅 Due Date*: {due_date}\n"
         else:
             admin_msg += f"• *✅ Payment Status*: Fully Paid\n"
         
         admin_msg += (
             f"\n━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"📌 *Registration Complete* | Member is now active"
+            f"⚡ *ACTION REQUIRED*: Please approve or reject this user."
         )
+        
+        # Inline buttons for Admin approval
+        keyboard = [
+            [
+                InlineKeyboardButton("✅ Approve", callback_data=f"appr_{user_id}"),
+                InlineKeyboardButton("❌ Reject", callback_data=f"reje_{user_id}")
+            ]
+        ]
         
         try:
             await context.bot.send_message(
                 chat_id=ADMIN_ID,
                 text=admin_msg,
+                reply_markup=InlineKeyboardMarkup(keyboard),
                 parse_mode="Markdown"
             )
         except Exception as e:
-            print(f"Failed to notify admin: {e}")
+            logger.error(f"Failed to notify admin: {e}")
         
     except Exception as e:
         await update.message.reply_text(

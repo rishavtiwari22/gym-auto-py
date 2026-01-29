@@ -660,7 +660,17 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         elif action == "appr":
             db.update_member_status(target_user_id, "Active")
-            await query.edit_message_text(f"✅ User `{target_user_id}` has been **Approved**.")
+            member = db.get_member(target_user_id)
+            name = member.get("Full Name", "User") if member else "User"
+            
+            await query.edit_message_text(
+                f"✅ *Application Approved*\n"
+                f"━━━━━━━━━━━━━━\n"
+                f"👤 Member: *{name}*\n"
+                f"🆔 ID: `{target_user_id}`\n\n"
+                f"Status updated to **Active**. User notified.",
+                parse_mode="Markdown"
+            )
             try:
                 await context.bot.send_message(
                     chat_id=target_user_id,
@@ -671,13 +681,28 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except: pass
                 
         elif action == "reje" or action == "deac":
-            db.update_member_status(target_user_id, "Inactive")
+            status = "Inactive"
+            db.update_member_status(target_user_id, status)
+            member = db.get_member(target_user_id)
+            name = member.get("Full Name", "User") if member else "User"
+            
             status_text = "Rejected" if action == "reje" else "Deactivated"
-            await query.edit_message_text(f"🚫 User `{target_user_id}` has been **{status_text}**.")
+            await query.edit_message_text(
+                f"🚫 *Application {status_text}*\n"
+                f"━━━━━━━━━━━━━━\n"
+                f"👤 Member: *{name}*\n"
+                f"🆔 ID: `{target_user_id}`\n\n"
+                f"Status updated to **Inactive**. User notified.",
+                parse_mode="Markdown"
+            )
             try:
+                msg = "⚠️ *Membership Update*\nYour membership status has been updated to **Inactive**."
+                if action == "reje":
+                    msg = "❌ *Application Update*\nYour membership application has been **Rejected**. Please contact the admin for details."
+                
                 await context.bot.send_message(
                     chat_id=target_user_id,
-                    text="⚠️ *Membership Update*\nYour membership status has been updated to **Inactive**.",
+                    text=msg,
                     reply_markup=ReplyKeyboardRemove(),
                     parse_mode="Markdown"
                 )
