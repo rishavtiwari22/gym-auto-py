@@ -13,16 +13,17 @@ A powerful Python-based Telegram bot for managing gym memberships, tracking atte
 
 ---
 
-## 📖 Learn How to Build This!
-We have created a **comprehensive, step-by-step tutorial** that teaches you how to build this exact system from scratch.
+## 📖 Learning Resources
+We have created two detailed tutorials to help you learn how to build this system from scratch:
 
-### [👉 Read the Full Tutorial Here](TUTORIAL.md)
+- **[⭐️ Beginner's Guide: The "Visitor Log" Feature](SIMPLE_TUTORIAL.md)**: A simple, bite-sized tutorial for beginners focusing on ONE basic feature.
+- **[📚 Comprehensive Guide: Full Automation System](TUTORIAL.md)**: A detailed, step-by-step guide covering the entire project logic.
 
 **What you will learn:**
-1. Setting up **BotFather** and Telegram APIs.
+1. Setting up **BotFather**, Telegram APIs, and **Inline Buttons**.
 2. Using **Google Sheets** as a database with the Cloud Console.
 3. Building multi-step **Conversation Flows** in Python.
-4. Implementing **Inline Buttons** and callback handling.
+4. Implementing **Admin Approval** logic and user notifications.
 5. Deploying your bot to **Render** for 24/7 uptime.
 
 ---
